@@ -64,11 +64,13 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch, label_ge
     for batch in pbar:
         # 1. 准备数据
         images = batch['image'].to(device)
-        pfm_gt = batch['pfm_gt'].to(device)  # 0, 1, 2
+        # pfm_gt = batch['pfm_gt'].to(device)  # 0, 1, 2
         mask_binary = batch['mask_binary'].to(device)
         with torch.no_grad():
             rsm_gt = label_gen.generate_rsm(mask_binary)
-        rsm_gt = torch.clamp(rsm_gt, 0.0, 1.0)
+            rsm_gt = torch.clamp(rsm_gt, 0.0, 1.0)
+            # [新] 生成 PFM (GPU)
+            pfm_gt = label_gen.generate_pfm(mask_binary)  # 返回 [B, H, W] LongTensor
         # 2. 前向传播
         # rsm_preds 是列表 (对应多个 PVB 分支)
         # pfm_logits 是中央分支输出
@@ -105,11 +107,14 @@ def validate(model, loader, criterion, metric_calc, device, epoch, save_vis_dir=
         pbar = tqdm(loader, desc=f"Epoch {epoch} [Valid]", unit="img")
         for i, batch in enumerate(pbar):
             images = batch['image'].to(device)
-            pfm_gt = batch['pfm_gt'].to(device)  # 用于计算 Validation Loss (带忽略区域)
+            # pfm_gt = batch['pfm_gt'].to(device)  # 用于计算 Validation Loss (带忽略区域)
             original_mask = batch['original_mask']  # 用于计算 Metrics (原始 0/1 GT)
 
             mask_binary = batch['mask_binary'].to(device)
+            # 生成 RSM GT 并限制数值范围
             rsm_gt = label_gen.generate_rsm(mask_binary)
+            rsm_gt = torch.clamp(rsm_gt, 0.0, 1.0)
+            pfm_gt = label_gen.generate_pfm(mask_binary)  # GPU 生成 PFM
             # 前向传播 (此时 model.training=False，返回的是 pfm_prob)
             # 但我们需要 Loss，所以这里手动调用 model.forward 的逻辑或者暂时把 model 设为 train 模式获取中间值
             # 为了简单，我们在 model 推理模式下通常只拿结果。
@@ -140,7 +145,7 @@ def validate(model, loader, criterion, metric_calc, device, epoch, save_vis_dir=
     metrics = metric_calc.compute()
     avg_loss = val_loss / len(loader)
 
-    print(f"\nVal Loss: {avg_loss:.4f} | AUC-PR: {metrics['auc_pr_list']:.4f} | Dice: {metrics['dice_list']:.4f}")
+    logger.info(f"\nVal Loss: {avg_loss:.4f} | AUC-PR: {metrics['auc_pr_list']:.4f} | Dice: {metrics['dice_list']:.4f}")
 
     # 可视化保存
     if save_vis_dir and vis_batch:

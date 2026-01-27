@@ -3,5 +3,5 @@
   <component name="Black">
     <option name="sdkName" value="Remote Python 3.11.10 (sftp://root@i-1.gpushare.com:20580/root/.virtualenvs/RPN1_0/bin/python)" />
   </component>
-  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.11.10 (sftp://root@i-1.gpushare.com:20580/root/.virtualenvs/RPN1_0/bin/python)" project-jdk-type="Python SDK" />
+  <component name="ProjectRootManager" version="2" project-jdk-name="Remote Python 3.11.10 (sftp://root@i-1.gpushare.com:20580/usr/local/bin/python3)" project-jdk-type="Python SDK" />
 </project>

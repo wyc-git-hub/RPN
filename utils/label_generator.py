@@ -66,41 +66,89 @@ class LabelGenerator(nn.Module):
 
         return rsm
 
-    def generate_pfm(self, mask_np):
+    # def generate_pfm(self, mask_np):
+        # """
+        # [CPU/Numpy 操作] 生成像素级聚焦掩模 (PFM)
+        #
+        # 注意: 由于 OpenCV 不支持 GPU Tensor，此函数通常在 Dataset 或 CPU 数据预处理阶段调用。
+        #
+        # Args:
+        #     mask_np (numpy.ndarray): 二值 Mask, Shape [H, W], 值 0 或 1
+        #
+        # Returns:
+        #     pfm (numpy.ndarray): 三值 Mask, Shape [H, W]
+        #                          1: Lesion (病灶)
+        #                          0: Surrounding (ROI 背景)
+        #                          2: Ignore (忽略背景)
+        # """
+        # # 1. 确保输入是 uint8 类型 (OpenCV 要求)
+        # mask_uint8 = mask_np.astype(np.uint8)
+        #
+        # # 2. 确定膨胀区域 (Surrounding Area)
+        # # 对应论文: B' = B ⊕ D
+        # kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (self.pfm_k, self.pfm_k))
+        # dilated_mask = cv2.dilate(mask_uint8, kernel, iterations=1)
+        #
+        # # 3. 构建三值 Mask
+        # # 初始化全图为 2 (Ignore)
+        # pfm = np.full_like(mask_np, 2, dtype=np.uint8)
+        #
+        # # 将膨胀区域设为 0 (ROI Background)
+        # pfm[dilated_mask == 1] = 0
+        #
+        # # 将原始病灶区域设为 1 (Lesion) -> 覆盖掉刚才的 0
+        # pfm[mask_uint8 == 1] = 1
+        #
+        # return pfm
+    def generate_pfm(self, mask_tensor):
         """
-        [CPU/Numpy 操作] 生成像素级聚焦掩模 (PFM)
-
-        注意: 由于 OpenCV 不支持 GPU Tensor，此函数通常在 Dataset 或 CPU 数据预处理阶段调用。
+        [GPU] 生成像素级聚焦掩模 (PFM)
+        利用 MaxPool2d 实现形态学膨胀，替代 cv2.dilate
 
         Args:
-            mask_np (numpy.ndarray): 二值 Mask, Shape [H, W], 值 0 或 1
+            mask_tensor (torch.Tensor): 二值 Mask, Shape [B, 1, H, W], float32, 值 0.0/1.0
 
         Returns:
-            pfm (numpy.ndarray): 三值 Mask, Shape [H, W]
-                                 1: Lesion (病灶)
-                                 0: Surrounding (ROI 背景)
-                                 2: Ignore (忽略背景)
+            pfm (torch.Tensor): 三值 Mask, Shape [B, H, W], dtype=torch.long
+                                1: Lesion (病灶)
+                                0: Surrounding (ROI 背景)
+                                2: Ignore (忽略背景)
         """
-        # 1. 确保输入是 uint8 类型 (OpenCV 要求)
-        mask_uint8 = mask_np.astype(np.uint8)
+        # 1. 维度与类型检查
+        if mask_tensor.dim() == 3:
+            mask_tensor = mask_tensor.unsqueeze(1)  # [B, 1, H, W]
 
-        # 2. 确定膨胀区域 (Surrounding Area)
-        # 对应论文: B' = B ⊕ D
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (self.pfm_k, self.pfm_k))
-        dilated_mask = cv2.dilate(mask_uint8, kernel, iterations=1)
+        # 2. 利用 MaxPool2d 实现膨胀 (Dilation)
+        # kernel_size 必须是奇数，stride=1, padding=k//2 可保持尺寸不变
+        padding = self.pfm_k // 2
 
-        # 3. 构建三值 Mask
-        # 初始化全图为 2 (Ignore)
-        pfm = np.full_like(mask_np, 2, dtype=np.uint8)
+        # MaxPool 对二值图操作：窗口内有 1 则输出 1 => 等效于膨胀
+        dilated_mask = F.max_pool2d(
+            mask_tensor,
+            kernel_size=self.pfm_k,
+            stride=1,
+            padding=padding
+        )
 
-        # 将膨胀区域设为 0 (ROI Background)
-        pfm[dilated_mask == 1] = 0
+        # 3. 构建三值 Mask (完全在 GPU 上操作)
+        # 初始化全为 2 (Ignore / 远离病灶的背景)
+        # 使用 full_like 保持 device 一致
+        pfm = torch.full_like(mask_tensor, 2.0)
 
-        # 将原始病灶区域设为 1 (Lesion) -> 覆盖掉刚才的 0
-        pfm[mask_uint8 == 1] = 1
+        # 逻辑：
+        #   a. 膨胀区域 (dilated == 1) 设为 0 (ROI Background / 关注的难例背景)
+        #   b. 原始病灶 (original == 1) 设为 1 (Lesion / 正样本)
 
-        return pfm
+        # 步骤 a: 将膨胀区域设为 0
+        # 注意: 使用 > 0.5 作为阈值来处理浮点精度
+        pfm[dilated_mask > 0.5] = 0.0
 
+        # 步骤 b: 将原始病灶区域设为 1 (这会覆盖掉部分步骤 a 的结果，即病灶中心)
+        pfm[mask_tensor > 0.5] = 1.0
+
+        # 4. 移除 Channel 维度并转为 Long 类型 (适配 CrossEntropyLoss)
+        # [B, 1, H, W] -> [B, H, W]
+        return pfm.squeeze(1).long()
     def process_batch(self, masks):
         """
         批处理辅助函数: 同时生成 RSM (Tensor) 和 PFM (Tensor)

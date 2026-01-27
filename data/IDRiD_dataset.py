@@ -126,11 +126,11 @@ class IDRiDDataset(Dataset):
         # mask 现在是 Tensor [1, H, W] (Float)
 
         # 需要转 numpy
-        mask_np = mask.squeeze().numpy().astype(np.uint8)
-        # 注意：这里调用 label_gen 的 generate_pfm 方法
-        # 虽然 label_gen 变成了 nn.Module，但 CPU 方法依然可用
-        pfm_np = self.label_gen.generate_pfm(mask_np)
-        pfm_gt = torch.from_numpy(pfm_np).long()
+        # mask_np = mask.squeeze().numpy().astype(np.uint8)
+        # # 注意：这里调用 label_gen 的 generate_pfm 方法
+        # # 虽然 label_gen 变成了 nn.Module，但 CPU 方法依然可用
+        # pfm_np = self.label_gen.generate_pfm(mask_np)
+        # pfm_gt = torch.from_numpy(pfm_np).long()
 
         # 2. RSM 不在这里生成了！
         # 直接返回原始的 mask，稍后在 GPU 上做卷积
@@ -138,7 +138,7 @@ class IDRiDDataset(Dataset):
         return {
             "image": image,
             "mask_binary": mask,  # <--- 新增：返回原始二值 mask (用于生成 RSM)
-            "pfm_gt": pfm_gt,  # PFM 还是这里产出
+            # "pfm_gt": pfm_gt,  # PFM 还是这里产出
             "original_mask": mask,
             "img_name": img_name
         }
