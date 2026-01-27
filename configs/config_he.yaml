@@ -1,0 +1,36 @@
+# 出血 (HE) 专用配置（占位）
+# 在此添加 HE 任务相关超参
+# ==============================
+# RPN Configuration for Hemorrhages (HE)
+# Based on Paper Table 4
+# ==============================
+
+# --- 任务信息 ---
+lesion_type: "HE"
+experiment_name: "RPN_HE_Baseline"
+save_dir: "./checkpoints/HE"
+
+# --- 模型结构参数 ---
+backbone_layers: 5
+
+# 出血可能需要更深层的语义信息来区分血管
+pvb_layer_indices: ['f_d2', 'f_d3', 'f_d4']
+cvb_fusion_layers: ['f_d1', 'f_d2', 'f_d3']
+
+# --- 标签生成参数 (核心) ---
+rsm_kernel: 65
+pfm_kernel: 65   # 出血区域通常较大，需要较大的膨胀范围
+
+# --- 训练超参数 ---
+input_size: [1000, 960]
+batch_size: 2
+val_batch_size: 2
+epochs: 500
+base_lr: 0.0001
+weight_decay: 0.0005
+lr_milestones: [250, 350, 400]
+
+# --- 系统设置 ---
+num_workers: 4
+device: "cuda"
+vis_freq: 20

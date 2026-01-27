@@ -1,0 +1,41 @@
+# 软渗出 (SE) 专用配置（占位）
+# 在此添加 SE 任务相关超参
+
+# ==============================
+# RPN Configuration for Hard Exudates (EX)
+# Based on Paper Table 4
+# ==============================
+
+# --- 任务信息 ---
+lesion_type: "SE"
+experiment_name: "RPN_SE_Baseline"
+save_dir: "./checkpoints/SE"
+
+# --- 模型结构参数 ---
+# EX 使用标准的 5 层 Backbone
+backbone_layers: 5
+
+# 挂载位置 (中层特征)
+pvb_layer_indices: ['f_d1', 'f_d2', 'f_d3', 'f_d4']
+
+# 融合层
+cvb_fusion_layers: ['f_d1', 'f_d2', 'f_d3']
+
+# --- 标签生成参数 (核心) ---
+# 比 MA 大，Kernel 相应增大
+rsm_kernel: 17
+pfm_kernel: 33
+
+# --- 训练超参数 ---
+input_size: [640, 640]
+batch_size: 2            # 显存占用增加，减小 Batch
+val_batch_size: 2
+epochs: 500
+base_lr: 0.0001
+weight_decay: 0.0005
+lr_milestones: [250, 350, 400]
+
+# --- 系统设置 ---
+num_workers: 4
+device: "cuda"
+vis_freq: 20

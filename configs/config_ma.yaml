@@ -1,0 +1,42 @@
+# 微动脉瘤 (MA) 专用配置（占位）
+# 论文 Table 1: Kernel=17, Layers=3
+# ==============================
+# RPN Configuration for Microaneurysms (MA)
+# Based on Paper Table 4
+# ==============================
+
+# --- 任务信息 ---
+lesion_type: "MA"
+experiment_name: "RPN_MA_Baseline"
+save_dir: "./checkpoints/MA"
+
+# --- 模型结构参数 ---
+# MA 需要高分辨率特征，使用较浅的 Backbone (3层) 效果最佳
+backbone_layers: 3
+
+# 周边视觉分支挂载的位置 (浅层特征对小目标更敏感)
+pvb_layer_indices: ['f_d1', 'f_d2']
+
+# 中央视觉分支融合的特征层
+cvb_fusion_layers: ['f_d1', 'f_d2']
+
+# --- 标签生成参数 (核心) ---
+# Kernel 大小决定了感受野和聚焦范围
+rsm_kernel: 35   # 生成概率热力图的卷积核
+pfm_kernel: 17   # 生成三值 Mask 的膨胀核
+
+# --- 训练超参数 ---
+input_size: [1000, 960]  # DDR 数据集标准尺寸 (H, W)
+batch_size: 4            # MA 图片较多且特征图较小，Batch 可稍大
+val_batch_size: 2
+epochs: 500
+base_lr: 0.0001
+weight_decay: 0.0005
+
+# 学习率衰减策略
+lr_milestones: [250, 350, 400]
+
+# --- 系统设置 ---
+num_workers: 4
+device: "cuda"
+vis_freq: 20             # 每 20 个 epoch 保存一次可视化结果
