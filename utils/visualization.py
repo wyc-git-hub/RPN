@@ -125,12 +125,12 @@ class VisualizationUtils:
             axes[i, 0].axis('off')
 
             # --- Column 2: RSM GT (Heatmap) ---
-            im2 = axes[i, 1].imshow(rsm_g, cmap='jet', vmin=0, vmax=1)
+            im2 = axes[i, 1].imshow(rsm_g, cmap='gray', vmin=0, vmax=1)
             axes[i, 1].set_title("GT RSM (Peripheral)")
             axes[i, 1].axis('off')
 
             # --- Column 3: RSM Pred (Heatmap) ---
-            im3 = axes[i, 2].imshow(rsm_p, cmap='jet', vmin=0, vmax=1)
+            im3 = axes[i, 2].imshow(rsm_p, cmap='gray', vmin=0, vmax=1)
             axes[i, 2].set_title("Pred RSM")
             axes[i, 2].axis('off')
 

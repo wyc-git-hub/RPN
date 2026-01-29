@@ -2,116 +2,123 @@
 
 import torch
 import numpy as np
-from sklearn.metrics import average_precision_score, roc_auc_score, precision_recall_curve, confusion_matrix
+
+"""
+优化后的评价指标计算器 (完全基于 GPU)
+解决 CPU 瓶颈，加速验证过程
+"""
 
 
 class MetricCalculator:
     """
-    医学图像分割评价指标计算器
-    对应论文 Section 4.2 [cite: 371-385]
-
-    核心指标:
-    1. AUC-PR (Area Under Precision-Recall Curve): 论文主指标，适合极度不平衡数据
-    2. Dice Coefficient (F1 Score)
-    3. IoU (Intersection over Union)
-    4. AUC-ROC (Supplementary metric)
+    医学图像分割评价指标计算器 (GPU 加速版)
+    对应论文 Section 4.2: AUC-PR, Dice, IoU
     """
 
     def __init__(self, threshold=0.5):
-        """
-        Args:
-            threshold (float): 将概率转为二值 mask 的阈值，默认 0.5
-        """
         self.threshold = threshold
         self.reset()
 
     def reset(self):
-        """重置内部累加器"""
         self.results = {
             "auc_pr_list": [],
-            "auc_roc_list": [],
             "dice_list": [],
             "iou_list": [],
             "precision_list": [],
             "recall_list": []
         }
 
+    def compute_auc_pr_gpu(self, prob, target):
+        """
+        在 GPU 上计算单张图片的 AUC-PR (Average Precision)
+        Args:
+            prob: (N,) Tensor, 0-1 概率
+            target: (N,) Tensor, 0/1 标签
+        """
+        # 1. 过滤掉忽略区域 (如果 target 中有非 0/1 的值，这里假设输入已经是 binary)
+        # 排序 (降序)
+        indices = torch.argsort(prob, descending=True)
+        prob = prob[indices]
+        target = target[indices]
+
+        # 2. 计算累计 TP 和 FP
+        # distinct_value_indices 用于处理概率相同的情况 (Ties)
+        # 但为了性能，通常直接计算即可，误差极小
+
+        # 累计 True Positives
+        tps = torch.cumsum(target, dim=0)
+        # 总 Positives
+        total_pos = tps[-1]
+
+        # 如果没有正样本，AUC-PR 未定义 (或视任务定义为 0/1)
+        if total_pos == 0:
+            return None
+
+            # 3. 计算 Precision 和 Recall
+        # fps = (index + 1) - tps
+        fps = torch.arange(1, len(target) + 1, device=target.device) - tps
+
+        precision = tps / (tps + fps + 1e-8)
+        recall = tps / (total_pos + 1e-8)
+
+        # 4. 计算 Average Precision (Sum(R_n - R_n-1) * P_n)
+        # 添加 R=0, P=1 的起始点 (可选，sklearn 的实现方式略有不同，这里采用标准积分近似)
+
+        # 简化的积分计算 (Right-Riemann sum，近似 sklearn 的 average_precision)
+        recall_diff = torch.cat([recall[0:1], recall[1:] - recall[:-1]])
+        ap = torch.sum(precision * recall_diff)
+
+        return ap.item()
+
     def update(self, pred_prob, target_binary):
         """
-        更新一个 Batch 的指标
-
+        更新 Batch 指标 (全部在 GPU 上进行)
         Args:
-            pred_prob (Tensor): 模型预测的概率图 (经过 Sigmoid), Shape [B, 1, H, W], 值域 [0, 1]
-            target_binary (Tensor): 原始 GT, Shape [B, 1, H, W] 或 [B, H, W], 值域 {0, 1}
-                                  注意：验证时请使用原始标签，不要使用带忽略区域(2)的 PFM
+            pred_prob: [B, 1, H, W] (Float, 0-1)
+            target_binary: [B, 1, H, W] (Float, 0/1)
         """
-        # 1. 数据预处理: 转 Numpy, 拉平, 确保是 CPU 浮点数
-        # 这种计算通常不可导，所以 detach
-        preds = pred_prob.detach().cpu().numpy()
-        targets = target_binary.detach().cpu().numpy()
+        # 确保数据在 GPU
+        # Flatten: [B, N_pixels]
+        B = pred_prob.size(0)
+        preds = pred_prob.view(B, -1)
+        targets = target_binary.view(B, -1)
 
-        # 兼容 [B, H, W] 的 target
-        if targets.ndim == 3:
-            targets = np.expand_dims(targets, axis=1)  # [B, 1, H, W]
+        for i in range(B):
+            p = preds[i]
+            t = targets[i]
 
-        batch_size = preds.shape[0]
-
-        # 2. 逐样本计算 (Per-image evaluation)
-        # 医学图像通常是按张计算指标，然后求平均，而不是把所有像素混在一起算
-        for i in range(batch_size):
-            p = preds[i].flatten()  # 拉成一维向量 [N_pixels]
-            t = targets[i].flatten().astype(int)  # 确保是整数 0/1
-
-            # 极特殊情况处理：如果一张图全是背景 (没有病灶)，AUC-PR 未定义
-            # 这种情况下，如果模型预测也全为0则满分，否则低分
-            if np.sum(t) == 0:
-                # 这里简单跳过或记为 NaN，视具体比赛规则而定
-                # 为了训练稳定，我们暂且跳过无病灶图片的 AUC 计算，只算 False Positive 相关的
+            # 1. 检查是否有正样本
+            if torch.sum(t) == 0:
+                # 对应论文/竞赛常见做法：
+                # 如果 Ground Truth 全黑，预测也全黑则满分，否则扣分
+                # 但 AUC-PR 在此情况未定义，通常跳过不计入 Mean
                 continue
 
-            # --- 核心指标: AUC-PR ---
-            # sklearn 的 average_precision_score 计算的就是 AUC-PR
-            auc_pr = average_precision_score(t, p)
-            self.results["auc_pr_list"].append(auc_pr)
+            # 2. 计算 AUC-PR (GPU)
+            auc_pr = self.compute_auc_pr_gpu(p, t)
+            if auc_pr is not None:
+                self.results["auc_pr_list"].append(auc_pr)
 
-            # --- 辅助指标: AUC-ROC ---
-            try:
-                auc_roc = roc_auc_score(t, p)
-                self.results["auc_roc_list"].append(auc_roc)
-            except ValueError:
-                pass  # 同样处理全0或全1的情况
-
-            # --- 基于阈值的指标 (Dice, IoU, Precision, Recall) ---
+            # 3. 计算 Dice, IoU, Precision, Recall (GPU)
             # 二值化
-            p_bin = (p > self.threshold).astype(int)
+            p_bin = (p > self.threshold).float()
 
-            # 计算 TP, FP, FN
-            # 技巧: TP = sum(p_bin * t)
-            tp = np.sum(p_bin * t)
-            fp = np.sum(p_bin * (1 - t))
-            fn = np.sum((1 - p_bin) * t)
+            tp = (p_bin * t).sum()
+            fp = (p_bin * (1 - t)).sum()
+            fn = ((1 - p_bin) * t).sum()
 
-            # 加极小值 epsilon 防止除零
             eps = 1e-6
-
             precision = tp / (tp + fp + eps)
             recall = tp / (tp + fn + eps)
-
-            # Dice (F1) = 2*TP / (2*TP + FP + FN)
             dice = (2 * tp) / (2 * tp + fp + fn + eps)
-
-            # IoU = TP / (TP + FP + FN)
             iou = tp / (tp + fp + fn + eps)
 
-            self.results["precision_list"].append(precision)
-            self.results["recall_list"].append(recall)
-            self.results["dice_list"].append(dice)
-            self.results["iou_list"].append(iou)
+            self.results["precision_list"].append(precision.item())
+            self.results["recall_list"].append(recall.item())
+            self.results["dice_list"].append(dice.item())
+            self.results["iou_list"].append(iou.item())
 
     def compute(self):
-        """
-        返回当前累计的平均指标
-        """
         metrics = {}
         for key, value_list in self.results.items():
             if len(value_list) > 0:
@@ -119,7 +126,6 @@ class MetricCalculator:
             else:
                 metrics[key] = 0.0
         return metrics
-
 
 # --- 单元测试代码 ---
 if __name__ == "__main__":

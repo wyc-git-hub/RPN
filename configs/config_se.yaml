@@ -16,7 +16,7 @@ save_dir: "./checkpoints/SE"
 backbone_layers: 5
 
 # 挂载位置 (中层特征)
-pvb_layer_indices: ['f_d1', 'f_d2', 'f_d3', 'f_d4']
+pvb_layer_indices: ['f_d2', 'f_d3']
 
 # 融合层
 cvb_fusion_layers: ['f_d1', 'f_d2', 'f_d3']
@@ -24,7 +24,7 @@ cvb_fusion_layers: ['f_d1', 'f_d2', 'f_d3']
 # --- 标签生成参数 (核心) ---
 # 比 MA 大，Kernel 相应增大
 rsm_kernel: 17
-pfm_kernel: 33
+pfm_kernel: 17
 
 # --- 训练超参数 ---
 input_size: [640, 640]

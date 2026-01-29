@@ -4,6 +4,7 @@ import argparse
 import time
 import torch
 import torch.optim as optim
+from torch import nn
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 from utils.config import get_config
@@ -75,14 +76,14 @@ def train_one_epoch(model, loader, criterion, optimizer, device, epoch, label_ge
         # rsm_preds 是列表 (对应多个 PVB 分支)
         # pfm_logits 是中央分支输出
         rsm_preds, pfm_logits = model(images)
-
         # 3. 计算 Loss
         loss, loss_dict = criterion(rsm_preds, rsm_gt, pfm_logits, pfm_gt)
 
         # 4. 反向传播
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad() # 清空梯度
+        loss.backward() # 反向传播计算梯度
+        optimizer.step() # 更新参数
+        # 上面这些操作必须在更新学习率之前完成
 
         # 5. 记录
         running_loss += loss.item()
@@ -108,7 +109,7 @@ def validate(model, loader, criterion, metric_calc, device, epoch, save_vis_dir=
         for i, batch in enumerate(pbar):
             images = batch['image'].to(device)
             # pfm_gt = batch['pfm_gt'].to(device)  # 用于计算 Validation Loss (带忽略区域)
-            original_mask = batch['original_mask']  # 用于计算 Metrics (原始 0/1 GT)
+            original_mask = batch['original_mask'].to(device)  # 用于计算 Metrics (原始 0/1 GT)
 
             mask_binary = batch['mask_binary'].to(device)
             # 生成 RSM GT 并限制数值范围
@@ -293,7 +294,7 @@ def main():
         train_loss = train_one_epoch(model, train_loader, criterion, optimizer, device, epoch,label_gen)
 
         # Scheduler Step
-        scheduler.step()
+        scheduler.step() # 每轮结束后更新学习率（内部计算更新时机）
 
         # Validation
         # 根据 vis_freq 决定是否保存图片

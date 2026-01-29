@@ -20,7 +20,7 @@ class RPN(nn.Module):
                  num_classes=1,
                  backbone_base_channels=64,
                  pvb_layer_indices=['f_d4', 'f_d3', 'f_d2', 'f_d1'],  # 默认挂载在 decoder 第2、3层
-                 cvb_fusion_layers=['f_d2', 'f_d1'],  # CVB 融合第1、2层特征
+                 cvb_fusion_layers=['f_d4', 'f_d3', 'f_d2', 'f_d1'],  # CVB 融合第1、2层特征
                  cvb_internal_channels=32):
         """
         Args:
